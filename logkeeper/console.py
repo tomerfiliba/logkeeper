@@ -1,4 +1,5 @@
 import sys
+from contextlib import contextmanager
 
 
 class BaseConsole(object):
@@ -6,6 +7,11 @@ class BaseConsole(object):
         pass
     def color(self, fg = None, bg = None):
         pass
+    @contextmanager
+    def colored(self, fg = None, bg = None):
+        ofg, obg = self.color(fg, bg)
+        yield
+        self.color(ofg, obg)
     def clear(self):
         pass
     def reset(self):
@@ -16,6 +22,18 @@ class BaseConsole(object):
         self.write(text + "\n")
 
 class FakeConsole(BaseConsole):
+    BLACK   = 0
+    RED     = 0
+    GREEN   = 0
+    YELLOW  = 0
+    BLUE    = 0
+    MAGENTA = 0
+    CYAN    = 0
+    WHITE   = 0
+    INTENSE = 0
+    
+    def color(self, fg = None, bg = None):
+        return None, None
     def write(self, text):
         sys.stdout.write(text)
 
@@ -104,11 +122,13 @@ if sys.platform == "win32":
         def move(self, x, y):
             SetConsoleCursorPosition(self._handle, COORD(x-1, y-1))
         def color(self, fg = None, bg = None):
+            prev = self._curr_attrs
             if fg is not None:
                 self._curr_attrs = (self._curr_attrs & 0xFFF0) | fg
             if bg is not None:
                 self._curr_attrs = (self._curr_attrs & 0xFF0F) | (bg << 4)
             SetConsoleTextAttribute(self._handle, self._curr_attrs)
+            return prev & 0xF, (prev >> 4) & 0xF
         
         def clear(self):
             csbi = CONSOLE_SCREEN_BUFFER_INFO()
@@ -141,18 +161,25 @@ else:
         
         def __init__(self, fileobj = sys.stdout):
             self.fileobj = fileobj
+            self._curr_fg = None
+            self._curr_bg = None
     
         def move(self, x, y):
             self.fileobj.write("\x1b[%s;%sH" % (y, x))
         def color(self, fg = None, bg = None):
+            ofg = self._curr_fg
+            obg = self._curr_bg
             codes = []
             if fg is not None:
                 if fg & self.INTENSE:
                     codes.append("1")
                 codes.append("3%d" % (fg & 0x7,))
+                self._curr_fg = fg
             if bg is not None:
                 codes.append("4%d" % (bg & 0x7,))
+                self._curr_bg = bg
             self.fileobj.write("\x1b[%sm" % (";".join(codes)))
+            return ofg, obg
         
         def clear(self):
             self.fileobj.write("\x1b[2J\x1b[1;1H")
@@ -168,35 +195,45 @@ elif sys.platform == "win32":
 else:
     console = AnsiConsole()
 
-class Style(object):
-    def __init__(self, fg = None, bg = None):
-        self.fg = fg
-        self.bg = bg
-    def __enter__(self):
-        console.color(self.fg, self.bg)
-    def __exit__(self, t, v, tb):
-        pass
 
-class Intense(Style):
-    def __or__(self, other):
-        return Style(other.fg | console.INTENSE)
-    __ror__ = __or__
+class Styled(object):
+    def __init__(self, *contents):
+        self.contents = contents
+    def __str__(self):
+        return "".join(str(cont) for cont in self.contents)
+    def write(self):
+        for cont in self.contents:
+            if isinstance(cont, Styled):
+                cont.write()
+            else:
+                console.write(cont)
+    def __add__(self, other):
+        return Styled(self, other)
+    def __radd__(self, other):
+        return Styled(other, self)
+#    def __mod__(self, other):
+#        pass
 
-INTENSE = Intense()
-RED = Style(fg = console.RED)
-BG_GREEN = Style(bg = console.GREEN)
+class Colored(Styled):
+    FG = None
+    BG = None
+    def __init__(self, *contents):
+        Styled.__init__(self, *contents)
+    def write(self):
+        with console.colored(self.FG, self.BG):
+            Styled.write(self)
 
-with BG_GREEN, RED | INTENSE:
-    console.writeln("hello")
+class Red(Colored):
+    FG = console.RED | console.INTENSE
+class Green(Colored):
+    FG = console.GREEN | console.INTENSE
+class Blue(Colored):
+    FG = console.BLUE | console.INTENSE
 
 
 
-
-
-
-
-
-
+x = Red("hello") + " wor" + Green("ld\n")
+x.write()
 
 
 
