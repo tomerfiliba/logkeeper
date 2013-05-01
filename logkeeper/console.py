@@ -1,10 +1,16 @@
 import sys
 from contextlib import contextmanager
+from string import Formatter
 
 
 class BaseConsole(object):
+    COLOR_MAP = {}
     def move(self, x, y):
         pass
+    
+    def _color_from_name(self, name):
+        return self.COLOR_MAP.get(name.strip().lower().replace("-", "_"), None)
+    
     def color(self, fg = None, bg = None):
         pass
     @contextmanager
@@ -29,7 +35,7 @@ class FakeConsole(BaseConsole):
     BLUE    = 0
     MAGENTA = 0
     CYAN    = 0
-    WHITE   = 0
+    WHITE = GREY = 0
     INTENSE = 0
     
     def color(self, fg = None, bg = None):
@@ -37,10 +43,73 @@ class FakeConsole(BaseConsole):
     def write(self, text):
         sys.stdout.write(text)
 
+class AnsiConsole(BaseConsole):
+    BLACK   = 0
+    RED     = 1
+    GREEN   = 2
+    YELLOW  = 3
+    BLUE    = 4
+    MAGENTA = 5
+    CYAN    = 6
+    WHITE = GREY = 7
+    INTENSE = 8
+
+    COLOR_MAP = dict(
+        black = BLACK,
+        dark_blue = BLUE,
+        dark_green = GREEN,
+        dark_cyan = CYAN,
+        dark_red = RED,
+        magenta = MAGENTA,
+        gold = YELLOW,
+        dark_yellow = YELLOW,
+        grey = GREY,
+        dark_grey = BLACK | INTENSE,
+        blue = BLUE | INTENSE,
+        green = GREEN | INTENSE,
+        cyan = CYAN | INTENSE,
+        red = RED | INTENSE,
+        purple = MAGENTA | INTENSE,
+        yellow = YELLOW | INTENSE,
+        white = GREY | INTENSE,
+    )
+    
+    def __init__(self, fileobj = sys.stdout):
+        self.fileobj = fileobj
+        self._curr_fg = None
+        self._curr_bg = None
+
+    def move(self, x, y):
+        self.fileobj.write("\x1b[%s;%sH" % (y, x))
+    def color(self, fg = None, bg = None):
+        if isinstance(fg, str):
+            fg = self._color_from_name(fg)
+        if isinstance(bg, str):
+            bg = self._color_from_name(bg)
+        ofg = self._curr_fg
+        obg = self._curr_bg
+        codes = []
+        if fg is not None:
+            if fg & self.INTENSE:
+                codes.append("1")
+            codes.append("3%d" % (fg & 0x7,))
+            self._curr_fg = fg
+        if bg is not None:
+            codes.append("4%d" % (bg & 0x7,))
+            self._curr_bg = bg
+        self.fileobj.write("\x1b[%sm" % (";".join(codes)))
+        return ofg, obg
+    
+    def clear(self):
+        self.fileobj.write("\x1b[2J\x1b[1;1H")
+    def reset(self):
+        self.fileobj.write("\x1b[0m")
+    def write(self, text):
+        self.fileobj.write(text)    
+
 
 if sys.platform == "win32":
-    from ctypes import byref
-    from ctypes import windll, Structure, POINTER, c_char
+    from ctypes import windll, Structure, POINTER, c_char, byref
     from ctypes.wintypes import BOOL, HANDLE, SHORT, WORD, DWORD
     
     class COORD(Structure):
@@ -106,8 +175,28 @@ if sys.platform == "win32":
         RED     = 4
         MAGENTA = 5
         YELLOW  = 6
-        GREY    = 7
+        WHITE = GREY = 7
         INTENSE = 8
+
+        COLOR_MAP = dict(
+            black = BLACK,
+            dark_blue = BLUE,
+            dark_green = GREEN,
+            dark_cyan = CYAN,
+            dark_red = RED,
+            magenta = MAGENTA,
+            gold = YELLOW,
+            dark_yellow = YELLOW,
+            grey = GREY,
+            dark_grey = BLACK | INTENSE,
+            blue = BLUE | INTENSE,
+            green = GREEN | INTENSE,
+            cyan = CYAN | INTENSE,
+            red = RED | INTENSE,
+            purple = MAGENTA | INTENSE,
+            yellow = YELLOW | INTENSE,
+            white = GREY | INTENSE,
+        )
         
         def __init__(self):
             self._handle = GetStdHandle(STD_OUTPUT_HANDLE)
@@ -122,6 +211,10 @@ if sys.platform == "win32":
         def move(self, x, y):
             SetConsoleCursorPosition(self._handle, COORD(x-1, y-1))
         def color(self, fg = None, bg = None):
+            if isinstance(fg, str):
+                fg = self._color_from_name(fg)
+            if isinstance(bg, str):
+                bg = self._color_from_name(bg)
             prev = self._curr_attrs
             if fg is not None:
                 self._curr_attrs = (self._curr_attrs & 0xFFF0) | fg
@@ -147,93 +240,75 @@ if sys.platform == "win32":
         def write(self, text):
             sys.stdout.write(text)
 
-else:
-    class AnsiConsole(BaseConsole):
-        BLACK   = 0
-        RED     = 1
-        GREEN   = 2
-        YELLOW  = 3
-        BLUE    = 4
-        MAGENTA = 5
-        CYAN    = 6
-        WHITE   = 7
-        INTENSE = 8
-        
-        def __init__(self, fileobj = sys.stdout):
-            self.fileobj = fileobj
-            self._curr_fg = None
-            self._curr_bg = None
-    
-        def move(self, x, y):
-            self.fileobj.write("\x1b[%s;%sH" % (y, x))
-        def color(self, fg = None, bg = None):
-            ofg = self._curr_fg
-            obg = self._curr_bg
-            codes = []
-            if fg is not None:
-                if fg & self.INTENSE:
-                    codes.append("1")
-                codes.append("3%d" % (fg & 0x7,))
-                self._curr_fg = fg
-            if bg is not None:
-                codes.append("4%d" % (bg & 0x7,))
-                self._curr_bg = bg
-            self.fileobj.write("\x1b[%sm" % (";".join(codes)))
-            return ofg, obg
-        
-        def clear(self):
-            self.fileobj.write("\x1b[2J\x1b[1;1H")
-        def reset(self):
-            self.fileobj.write("\x1b[0m")
-        def write(self, text):
-            self.fileobj.write(text)    
-
 if not sys.stdout.isatty():
     console = FakeConsole()
 elif sys.platform == "win32":
-    console = WindowsConsole()
+    try:
+        console = WindowsConsole()
+    except WindowsError:
+        console = FakeConsole()
 else:
     console = AnsiConsole()
 
 
 class Styled(object):
-    def __init__(self, *contents):
-        self.contents = contents
+    __slots__ = ["value", "fg", "bg"]
+    def __init__(self, value, style):
+        self.value = value
+        if "," in style:
+            self.fg, self.bg = style.split(",")
+        else:
+            self.fg, self.bg = style, ""
     def __str__(self):
-        return "".join(str(cont) for cont in self.contents)
-    def write(self):
-        for cont in self.contents:
-            if isinstance(cont, Styled):
-                cont.write()
-            else:
-                console.write(cont)
-    def __add__(self, other):
-        return Styled(self, other)
-    def __radd__(self, other):
-        return Styled(other, self)
-#    def __mod__(self, other):
-#        pass
+        return str(self.value)
+    def __format__(self, spec):
+        return format(self.value, spec)
 
-class Colored(Styled):
-    FG = None
-    BG = None
-    def __init__(self, *contents):
-        Styled.__init__(self, *contents)
-    def write(self):
-        with console.colored(self.FG, self.BG):
-            Styled.write(self)
+class ConsoleFormatter(Formatter):
+    def __init__(self, console):
+        Formatter.__init__(self)
+        self.console = console
+    
+    def get_value(self, key, args, kwds):
+        if not isinstance(key, str) or "#" not in key:
+            return Formatter.get_value(self, key, args, kwds)
 
-class Red(Colored):
-    FG = console.RED | console.INTENSE
-class Green(Colored):
-    FG = console.GREEN | console.INTENSE
-class Blue(Colored):
-    FG = console.BLUE | console.INTENSE
+        key, style = key.split("#")
+        key = key.strip()
+        if key.isdigit():
+            key = int(key.strip())
+            val = Formatter.get_value(self, key, args, kwds)
+        elif key[0] == key[-1] == '"' or key[0] == key[-1] == "'":
+            val = key[1:-1]
+        else:
+            val = Formatter.get_value(self, key, args, kwds)
+        return Styled(val, style.strip())
+    
+    def _vformat(self, format_string, args, kwargs, used_args, recursion_depth):
+        if recursion_depth < 0:
+            raise ValueError('Max string recursion exceeded')
+        
+        for literal_text, field_name, format_spec, conversion in self.parse(format_string):
+            if literal_text:
+                self.console.write(literal_text)
+            if field_name is not None:
+                obj, arg_used = self.get_field(field_name, args, kwargs)
+                used_args.add(arg_used)
+                obj = self.convert_field(obj, conversion)
+                format_spec = Formatter._vformat(self, format_spec, args, kwargs, used_args, recursion_depth-1)
+                text = self.format_field(obj, format_spec)
+                if isinstance(obj, Styled):
+                    with self.console.colored(obj.fg, obj.bg):
+                        self.console.write(text)
+                else:
+                    self.console.write(text)
+        return ""
+
+console_formatter = ConsoleFormatter(console)
 
 
-
-x = Red("hello") + " wor" + Green("ld\n")
-x.write()
+if __name__ == "__main__":
+    console_formatter.format("errno is {0 #CYAN,DARK_BLUE:10} and i like {'bananas' # YELLOW}", 5)
 
 
 

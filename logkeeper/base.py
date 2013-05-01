@@ -2,9 +2,9 @@ import sys
 import traceback
 import os
 import thread
-import time
 from contextlib import contextmanager
 from datetime import datetime
+from logkeeper.console import console_formatter
 
 _logger_registry = {}
 
@@ -16,30 +16,27 @@ class LogHandler(object):
     def process_record(self, record):
         raise NotImplementedError()
 
-#class TextualFormatter(LogHandler):
-#    def __init__(self, prefix_fmt = "[%(time)s %(logger)s/%(level)s]", date_fmt = "%H:%M:%S"):
-#        self.prefix_fmt = prefix_fmt
-#        self.date_fmt = date_fmt
-
 class FileHandler(LogHandler):
     def __init__(self):
         pass
     def process_record(self, record):
         pass
 
+class RotatingFileHandler(LogHandler):
+    def __init__(self, prefix, num_of_files, max_file_size):
+        pass
+
 class ConsoleHandler(LogHandler):
-    def __init__(self, stream = sys.stderr, prefix_fmt = "[%(time)s %(logger)s/%(level)s]", date_fmt = "%H:%M:%S"):
+    def __init__(self, stream = sys.stderr, prefix = "{time#dark_grey:%H:%M:%S} {logger} {level#gold:5}{']'#dark_grey} "):
         self.stream = stream
-        self.prefix_fmt = prefix_fmt
-        self.date_fmt = date_fmt
+        self.prefix = prefix
     
     def process_record(self, record):
-        if self.stream.isatty():
-            pass
-        record["time"] = datetime.fromtimestamp(record["ts"]).strftime(self.date_fmt)
-        prefix = self.prefix_fmt % record
-        self.stream.write("%s %s%s\n" % (prefix, "    " * record["nesting"], record["msg"]))
-        self.stream.flush()
+        console_formatter.format(self.prefix, **record)
+        if record["nesting"]:
+            console_formatter.format("    " * record["nesting"])
+        lines = "\n        | ".join(record["msg"].strip().splitlines())
+        console_formatter.format(lines + "\n", *record["args"])
 
 class Logger(LogHandler):
     def __init__(self, name, parent = None):
@@ -54,17 +51,16 @@ class Logger(LogHandler):
             if parent is not None or "." not in name:
                 _logger_registry[name] = object.__new__(cls, name, parent)
             else:
-                parts = name.split(".")
-                for i in range(1, len(parts)):
-                    parts[:i]
-            
+                parent, this = name.rsplit(".", 1)
+                return cls(parent).sublogger(this)
         return _logger_registry[name]
     
-    def add_handler(self, level, handler):
-        if level not in self._handlers:
-            self._handlers[level] = []
-        if handler not in self._handlers[level]:
-            self._handlers[level].append(handler)
+    def add_handlers(self, **kwargs):
+        for level, handler in kwargs.items():
+            if level not in self._handlers:
+                self._handlers[level] = []
+            if handler not in self._handlers[level]:
+                self._handlers[level].append(handler)
     
     def remove_handler(self, level, handler):
         if level in self._handlers and handler in self._handlers[level]:
@@ -78,20 +74,9 @@ class Logger(LogHandler):
         return Logger(("%s.%s" % (self.name, name)) if self.name else name, self)
     
     def log(self, level, msg, *args):
-        if args:
-            try:
-                msg %= args
-            except (TypeError, ValueError) as ex:
-                msg = "%s\n%r - %s" % (msg, args, ex)
-        record = {"level" : level, "logger" : self.name, "ts" : time.time(), "pid" : os.getpid(), 
-            "tid" : thread.get_ident(), "msg" : msg, "frame" : None, "nesting" : self._nesting}
-        
-        if self._include_frame:
-            f = sys._getframe()
-            while f is not None and f.f_code.co_filename == __file__:
-                f = f.f_back
-            record["frame"] = f
-        
+        record = {"logger" : self.name, "level" : level, "time" : datetime.now(), "pid" : os.getpid(), 
+            "tid" : thread.get_ident(), "msg" : msg, "args" : args, "nesting" : self._nesting}
+
         self.process_record(record)
         if self._parent:
             self._parent.process_record(record)
@@ -108,9 +93,7 @@ class Logger(LogHandler):
     def exception(self, msg, *args, **kwargs):
         exc_info = kwargs.pop("exc_info", sys.exc_info())
         tbtext = "".join(traceback.format_exception(*exc_info))
-        msg += "\n%s"
-        args += (tbtext,)
-        self.log("EXCEPTION", msg, *args)
+        self.log("EXC", msg + "\n" + tbtext, *args)
     
     @contextmanager
     def step(self):
@@ -121,20 +104,26 @@ class Logger(LogHandler):
             self._nesting -= 1
 
 root = Logger("root")
-console = ConsoleHandler()
-root.add_handler("INFO", console)
+info_console_hdlr = ConsoleHandler()
+warn_console_hdlr = ConsoleHandler(prefix = "{time#dark_grey:%H:%M:%S} {logger} {level#yellow:5}{']'#dark_grey} ")
+err_console_hdlr = ConsoleHandler(prefix = "{time#dark_grey:%H:%M:%S} {logger} {level#white,red:5}{']'#dark_grey} ")
+root.add_handlers(INFO = info_console_hdlr, WARN = warn_console_hdlr, 
+    ERROR = err_console_hdlr, EXC = err_console_hdlr)
 
 if __name__ == "__main__":
     root.info("hello")
+    root.debug("invisible")
     with root.step():
         root.info("world")
-
-
-
-
-
-
-
+        with root.step():
+            root.info("zolrd")
+        root.error("oh no!")
+        root.info("oops")
+        try:
+            1/0
+        except Exception:
+            root.exception("oh my god")
+    root.warn("loops")
 
 
 
