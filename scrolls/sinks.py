@@ -6,6 +6,7 @@ class FileSink(LogSink):
     def __init__(self, stream, flush = True):
         self.stream = stream
     def write(self, obj):
+        # thread synchronization!
         line = str(obj).strip() + "\n"
         self.stream.write(line)
         self.stream.flush()
@@ -20,7 +21,17 @@ class EmailSink(LogSink):
     def __init__(self, fromaddr, toaddr, server, subject = ""):
         pass
 
+class SyslogSink(LogSink):
+    def __init__(self, prefix):
+        pass
+
+class NTEventLogSink(LogSink):
+    pass
 
 
 
- 
+
+
+
+
+
