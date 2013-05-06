@@ -2,6 +2,7 @@ from scrolls.base import LogHandler, AttrDict, Logger
 
 
 class LogFormatter(LogHandler):
+    __slots__ = ["sink"]
     def __init__(self, sink):
         self.sink = sink
     def process_record(self, record):
@@ -11,7 +12,7 @@ class LogFormatter(LogHandler):
 
 class TextFormatter(LogFormatter):
     ANSI_COLORS = AttrDict(
-        reset = b"\1b[0m",
+        reset = b"\x1b[0m",
         fg_black = b"\x1b[30m",
         fg_grey = b"\x1b[1;30m",
         fg_red = b"\x1b[31m",
@@ -45,18 +46,20 @@ class TextFormatter(LogFormatter):
     LEVEL_COLORS = AttrDict({
         Logger.INFO : "white",
         Logger.WARNING : "yellow",
-        Logger.ERROR : "red",
+        Logger.ERROR : "bold_red",
     })
     
-    PREFIX_FORMAT = ("{colors.grey}[{record.time:%H:%M:%S} {colors.bold_white}{record.name} "
-        "{colors[level_colors[record.level]]}{record.level}{colors.grey}] {colors.white}")
+    PREFIX_FORMAT = ("{colors.grey}[{record.time:%H:%M:%S}{colors.reset} "
+        "{colors.bold_white}{record.name}{colors.reset}/"
+        "{level_color}{record.level:7}{colors.grey}]{colors.reset} ")
     
     def format_record(self, record):
         msg = record["msg"]
         if record["args"]:
             msg = msg.format(record["args"])
-        return "%s%s" % (self.PREFIX_FORMAT.format(record = record, 
-            colors = self.ANSI_COLORS, level_colors = self.LEVEL_COLORS), msg)
+        prefix = self.PREFIX_FORMAT.format(record = record, colors = self.ANSI_COLORS, 
+            level_color = self.ANSI_COLORS[self.LEVEL_COLORS[record.level]]) 
+        return "%s%s%s" % (prefix, "    " * record.nesting, msg)
 
 
 

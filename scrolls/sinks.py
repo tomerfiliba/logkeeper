@@ -1,4 +1,5 @@
 class LogSink(object):
+    __slots__ = []
     def write(self, obj):
         raise NotImplementedError()
 
@@ -6,7 +7,7 @@ class FileSink(LogSink):
     def __init__(self, stream, flush = True):
         self.stream = stream
     def write(self, obj):
-        # thread synchronization!
+        # synchronize this!
         line = str(obj).strip() + "\n"
         self.stream.write(line)
         self.stream.flush()

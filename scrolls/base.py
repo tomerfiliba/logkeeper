@@ -5,24 +5,22 @@ from datetime import datetime
 
 
 class LogHandler(object):
+    __slots__ = []
     def process_record(self, record):
         raise NotImplementedError()
 
 class RecordExtender(object):
+    __slots__ = []
     def extend_record(self, record):
         raise NotImplementedError()
-
-class ProcInfoExtender(RecordExtender):
-    def extend_record(self, record):
-        record.update(pid = os.getpid(), tid = thread.get_ident())
-
-_loggers_registry = {}
 
 class AttrDict(dict):
     __slots__ = []
     __getattr__ = dict.__getitem__
     __delattr__ = dict.__delitem__
     __setattr__ = dict.__setitem__
+
+_loggers_registry = {}
 
 class Logger(LogHandler, RecordExtender):
     class __metaclass__(type):
@@ -50,7 +48,7 @@ class Logger(LogHandler, RecordExtender):
     def __repr__(self):
         return "Logger(%r)" % (self.name,)
 
-    def add_handler(self, **handlers):
+    def add_handlers(self, **handlers):
         for level, handler in handlers.items():
             level = level.upper()
             if level not in self.LEVELS:
@@ -80,7 +78,8 @@ class Logger(LogHandler, RecordExtender):
 
     def log(self, level, msg, args):
         record = AttrDict(level = level, name = self.name, msg = msg, args = args, 
-            time = datetime.now(), nesting = self._nesting)
+            time = datetime.now(), nesting = self._nesting, pid = os.getpid(), 
+            tid = thread.get_ident())
         self.extend_record(record)
         self.process_record(record)
 
@@ -108,17 +107,6 @@ class Logger(LogHandler, RecordExtender):
 RootLogger = None
 RootLogger = Logger("root")
 
-#console_handler = ConsoleHandler(sys.stderr, 
-#    colorize = sys.stderr.isatty() and sys.platform != "win32")
-#RootLogger.add_handler(info = console_handler, warning = console_handler, error = console_handler)
-RootLogger.add_extender(ProcInfoExtender())
-
-
-
-if __name__ == "__main__":
-    foo = Logger("foo")
-    foo.info("hello")
-    
 
 
 
